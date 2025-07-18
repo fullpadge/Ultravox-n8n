@@ -1,0 +1,321 @@
+#!/bin/bash
+
+# Script de résolution des problèmes d'import n8n
+# Spécialement conçu pour le workflow Ultravox
+
+echo "🔧 Résolution des problèmes d'import n8n Ultravox"
+echo "=================================================="
+
+# Vérifier la version de n8n
+check_n8n_version() {
+    echo "📋 Vérification de la version n8n..."
+    
+    if docker ps | grep -q "n8n"; then
+        VERSION=$(docker exec $(docker ps | grep n8n | awk '{print $1}') n8n --version 2>/dev/null || echo "unknown")
+        echo "Version n8n détectée: $VERSION"
+        
+        # Vérifier si la version est compatible
+        if [[ "$VERSION" == "unknown" ]]; then
+            echo "⚠️ Impossible de détecter la version n8n"
+            return 1
+        fi
+    else
+        echo "❌ Conteneur n8n non trouvé"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Créer un workflow minimal de test
+create_test_workflow() {
+    echo "🧪 Création d'un workflow de test minimal..."
+    
+    cat > test-minimal.json << 'EOF'
+{
+  "meta": {
+    "instanceId": "test-minimal"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "test"
+      },
+      "id": "webhook-test",
+      "name": "Test Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [300, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"status\": \"ok\", \"message\": \"Test réussi\"}"
+      },
+      "id": "response-test", 
+      "name": "Test Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [500, 300]
+    }
+  ],
+  "connections": {
+    "Test Webhook": {
+      "main": [
+        [
+          {
+            "node": "Test Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "triggerCount": 1
+}
+EOF
+
+    echo "✅ Workflow de test créé: test-minimal.json"
+}
+
+# Nettoyer les fichiers JSON problématiques
+clean_json_files() {
+    echo "🧹 Nettoyage des fichiers JSON..."
+    
+    # Supprimer les caractères problématiques
+    if [ -f "workflow-ultravox-n8n.json" ]; then
+        # Créer une sauvegarde
+        cp workflow-ultravox-n8n.json workflow-ultravox-n8n.json.backup
+        
+        # Nettoyer le fichier
+        sed -i 's/\r//g' workflow-ultravox-n8n.json  # Supprimer les retours chariot Windows
+        sed -i 's/\t/  /g' workflow-ultravox-n8n.json  # Remplacer tabs par espaces
+        
+        echo "✅ Fichier original nettoyé"
+    fi
+}
+
+# Valider la structure JSON
+validate_json() {
+    echo "✅ Validation des fichiers JSON..."
+    
+    for file in workflow-ultravox-*.json test-minimal.json; do
+        if [ -f "$file" ]; then
+            if python3 -m json.tool "$file" > /dev/null 2>&1; then
+                echo "✅ $file: JSON valide"
+            else
+                echo "❌ $file: JSON invalide"
+                # Essayer de corriger automatiquement
+                echo "🔧 Tentative de correction automatique..."
+                
+                # Corriger les virgules en trop
+                sed -i 's/,\s*}/}/g' "$file"
+                sed -i 's/,\s*]/]/g' "$file"
+                
+                if python3 -m json.tool "$file" > /dev/null 2>&1; then
+                    echo "✅ $file: Corrigé avec succès"
+                else
+                    echo "❌ $file: Correction échouée"
+                fi
+            fi
+        fi
+    done
+}
+
+# Tester l'import via API n8n
+test_import_api() {
+    echo "🔌 Test d'import via API n8n..."
+    
+    # Attendre que n8n soit prêt
+    echo "⏳ Attente de n8n..."
+    sleep 5
+    
+    # Tester avec le workflow minimal
+    if [ -f "test-minimal.json" ]; then
+        RESPONSE=$(curl -s -X POST \
+            http://localhost:5678/rest/workflows \
+            -H "Content-Type: application/json" \
+            -d @test-minimal.json 2>/dev/null)
+        
+        if echo "$RESPONSE" | grep -q '"id"'; then
+            echo "✅ Import API réussi avec workflow minimal"
+            return 0
+        else
+            echo "❌ Import API échoué"
+            echo "Réponse: $RESPONSE"
+            return 1
+        fi
+    fi
+    
+    return 1
+}
+
+# Créer les credentials requis
+create_credentials() {
+    echo "🔑 Création des credentials de base..."
+    
+    # Credential Ultravox (Header Auth)
+    cat > credential-ultravox.json << 'EOF'
+{
+  "name": "Ultravox API",
+  "type": "httpHeaderAuth",
+  "data": {
+    "name": "X-API-Key",
+    "value": "your-api-key-here"
+  }
+}
+EOF
+
+    # Credential PostgreSQL
+    cat > credential-postgres.json << 'EOF'
+{
+  "name": "PostgreSQL Ultravox",
+  "type": "postgres",
+  "data": {
+    "host": "postgres",
+    "port": 5432,
+    "database": "ultravox_db",
+    "user": "ultravox_user",
+    "password": "ultravox_password_123"
+  }
+}
+EOF
+
+    echo "✅ Templates de credentials créés"
+    echo "⚠️ N'oubliez pas de remplir vos vraies clés API"
+}
+
+# Recommandations de dépannage
+show_recommendations() {
+    echo ""
+    echo "📋 RECOMMANDATIONS DE DÉPANNAGE"
+    echo "================================="
+    echo ""
+    echo "1. 🆕 WORKFLOW MINIMAL"
+    echo "   → Essayez d'abord: workflow-simple-test.json"
+    echo "   → Puis tentez: workflow-ultravox-fixed.json"
+    echo ""
+    echo "2. 🔑 CREDENTIALS"
+    echo "   → Créez d'abord tous les credentials dans n8n"
+    echo "   → Utilisez les templates dans credential-*.json"
+    echo ""
+    echo "3. 🌐 IMPORT MANUEL"
+    echo "   → Interface n8n: http://localhost:5678"
+    echo "   → Workflows → Import → Sélectionner fichier"
+    echo ""
+    echo "4. 🔧 IMPORT VIA API"
+    echo "   curl -X POST http://localhost:5678/rest/workflows \\"
+    echo "        -H 'Content-Type: application/json' \\"
+    echo "        -d @workflow-simple-test.json"
+    echo ""
+    echo "5. 📝 CRÉATION MANUELLE"
+    echo "   → Créer nouveau workflow vide"
+    echo "   → Ajouter nœud par nœud:"
+    echo "     - Webhook (path: ultravox-webhook)"
+    echo "     - HTTP Request (GET https://api.ultravox.ai/api/calls)"
+    echo "     - Code (analyse simple)"
+    echo "     - Respond to Webhook"
+    echo ""
+    echo "6. 🔍 DIAGNOSTICS"
+    echo "   → Logs: docker-compose logs n8n"
+    echo "   → Debug: export N8N_LOG_LEVEL=debug"
+    echo ""
+}
+
+# Test de connectivité
+test_connectivity() {
+    echo "🌐 Test de connectivité..."
+    
+    # Tester n8n
+    if curl -s http://localhost:5678 > /dev/null; then
+        echo "✅ n8n accessible sur port 5678"
+    else
+        echo "❌ n8n non accessible"
+        echo "   → Vérifiez: docker-compose ps"
+        echo "   → Redémarrez: docker-compose restart n8n"
+    fi
+    
+    # Tester PostgreSQL
+    if docker exec postgres-ultravox pg_isready -U ultravox_user > /dev/null 2>&1; then
+        echo "✅ PostgreSQL accessible"
+    else
+        echo "❌ PostgreSQL non accessible"
+        echo "   → Vérifiez: docker-compose ps"
+    fi
+    
+    # Tester API Ultravox
+    if curl -s https://api.ultravox.ai > /dev/null; then
+        echo "✅ API Ultravox accessible"
+    else
+        echo "❌ API Ultravox non accessible"
+        echo "   → Vérifiez votre connexion internet"
+    fi
+}
+
+# Menu principal
+main_menu() {
+    echo ""
+    echo "🔧 MENU DE DÉPANNAGE"
+    echo "===================="
+    echo "1. Vérifier la version n8n"
+    echo "2. Créer workflow de test minimal"
+    echo "3. Nettoyer les fichiers JSON"
+    echo "4. Valider la structure JSON"
+    echo "5. Tester l'import via API"
+    echo "6. Créer les credentials de base"
+    echo "7. Test de connectivité"
+    echo "8. Afficher les recommandations"
+    echo "9. Tout exécuter (recommandé)"
+    echo "0. Quitter"
+    echo ""
+    read -p "Choisissez une option (0-9): " choice
+    
+    case $choice in
+        1) check_n8n_version ;;
+        2) create_test_workflow ;;
+        3) clean_json_files ;;
+        4) validate_json ;;
+        5) test_import_api ;;
+        6) create_credentials ;;
+        7) test_connectivity ;;
+        8) show_recommendations ;;
+        9) 
+            echo "🚀 Exécution complète..."
+            check_n8n_version
+            create_test_workflow
+            clean_json_files
+            validate_json
+            create_credentials
+            test_connectivity
+            test_import_api
+            show_recommendations
+            ;;
+        0) echo "👋 Au revoir!"; exit 0 ;;
+        *) echo "❌ Option invalide"; main_menu ;;
+    esac
+    
+    echo ""
+    read -p "Appuyez sur Entrée pour continuer..."
+    main_menu
+}
+
+# Point d'entrée
+echo "🔧 Script de dépannage pour workflow Ultravox n8n"
+echo "Ce script va diagnostiquer et résoudre les problèmes d'import"
+echo ""
+
+# Vérifier si nous sommes dans le bon répertoire
+if [ ! -f "docker-compose.yml" ]; then
+    echo "⚠️ Fichier docker-compose.yml non trouvé"
+    echo "   Assurez-vous d'être dans le répertoire du projet"
+    echo "   Ou exécutez: cd ~/ultravox-workflow"
+    exit 1
+fi
+
+# Lancer le menu
+main_menu

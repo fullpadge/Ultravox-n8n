@@ -1,0 +1,393 @@
+{
+  "meta": {
+    "instanceId": "ultravox-workflow-instance"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ultravox-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "ultravox-webhook-id"
+    },
+    {
+      "parameters": {
+        "requestMethod": "GET",
+        "url": "https://api.ultravox.ai/api/calls",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "get-calls",
+      "name": "Récupérer Appels Ultravox",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ultravox-api-credentials",
+          "name": "Ultravox API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "split-calls",
+      "name": "Traiter Chaque Appel",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "requestMethod": "GET",
+        "url": "=https://api.ultravox.ai/api/calls/{{ $json.id }}/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "get-transcript",
+      "name": "Récupérer Transcript",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        900,
+        200
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ultravox-api-credentials",
+          "name": "Ultravox API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "requestMethod": "GET",
+        "url": "https://api.ultravox.ai/api/accounts/me/usage/calls",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "get-stats",
+      "name": "Récupérer Statistiques",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        900,
+        400
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ultravox-api-credentials",
+          "name": "Ultravox API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Analyser le transcript pour détecter les rendez-vous\nconst transcriptData = $input.first().json;\nconst messages = transcriptData.results || [];\n\n// Mots-clés pour détecter les RDV\nconst rdvKeywords = ['rendez-vous', 'rdv', 'meeting', 'appointment', 'reunion', 'consultation'];\nconst dateKeywords = ['demain', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];\nconst timeKeywords = ['heure', 'h', ':', 'matin', 'après-midi', 'soir'];\n\nlet rdvDetected = false;\nlet rdvDetails = {\n  date: null,\n  time: null,\n  description: '',\n  participant: null,\n  needsConfirmation: false\n};\n\n// Analyser chaque message\nfor (const message of messages) {\n  const text = message.text?.toLowerCase() || '';\n  \n  // Détecter mention de RDV\n  const hasRdvKeyword = rdvKeywords.some(keyword => text.includes(keyword));\n  \n  if (hasRdvKeyword) {\n    rdvDetected = true;\n    rdvDetails.description += text + ' ';\n    \n    // Extraire les détails de date/heure\n    const hasDate = dateKeywords.some(keyword => text.includes(keyword));\n    const hasTime = timeKeywords.some(keyword => text.includes(keyword));\n    \n    if (hasDate) {\n      rdvDetails.date = text.match(/(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|demain)/)?.[0] || null;\n    }\n    \n    if (hasTime) {\n      const timeMatch = text.match(/(\\d{1,2})[h:]?(\\d{2})?/);\n      if (timeMatch) {\n        rdvDetails.time = timeMatch[0];\n      }\n    }\n    \n    rdvDetails.needsConfirmation = true;\n  }\n}\n\nreturn {\n  callId: $('split-calls').item.json.id,\n  rdvDetected,\n  rdvDetails,\n  transcript: messages\n};"
+      },
+      "id": "analyze-transcript",
+      "name": "Analyser Transcript",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "rdv-condition",
+              "leftValue": "={{ $json.rdvDetected }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-rdv",
+      "name": "RDV Détecté?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Créer un événement iCal\nconst rdv = $json.rdvDetails;\nconst now = new Date();\nconst tomorrow = new Date(now);\ntomorrow.setDate(now.getDate() + 1);\n\n// Calculer la date du RDV\nlet rdvDate = tomorrow;\nif (rdv.date) {\n  const dayMap = {\n    'lundi': 1, 'mardi': 2, 'mercredi': 3, 'jeudi': 4,\n    'vendredi': 5, 'samedi': 6, 'dimanche': 0\n  };\n  \n  const targetDay = dayMap[rdv.date];\n  if (targetDay !== undefined) {\n    rdvDate = new Date(now);\n    const currentDay = rdvDate.getDay();\n    const daysToAdd = (targetDay - currentDay + 7) % 7 || 7;\n    rdvDate.setDate(rdvDate.getDate() + daysToAdd);\n  }\n}\n\n// Définir l'heure\nlet rdvTime = '10:00';\nif (rdv.time) {\n  rdvTime = rdv.time.replace('h', ':');\n  if (!rdvTime.includes(':')) {\n    rdvTime += ':00';\n  }\n}\n\n// Créer l'événement\nconst startDateTime = new Date(rdvDate.toDateString() + ' ' + rdvTime);\nconst endDateTime = new Date(startDateTime.getTime() + 60 * 60 * 1000);\n\nreturn {\n  title: 'Rendez-vous confirmé via Ultravox',\n  description: rdv.description.trim(),\n  startDate: startDateTime.toISOString(),\n  endDate: endDateTime.toISOString(),\n  location: 'À définir',\n  callId: $json.callId,\n  originalRdv: rdv\n};"
+      },
+      "id": "create-calendar-event",
+      "name": "Créer Événement",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "calendarId": "primary",
+        "start": "={{ $json.startDate }}",
+        "end": "={{ $json.endDate }}",
+        "summary": "={{ $json.title }}",
+        "description": "={{ $json.description }}",
+        "location": "={{ $json.location }}",
+        "options": {}
+      },
+      "id": "save-to-calendar",
+      "name": "Sauvegarder Calendrier",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 2,
+      "position": [
+        1780,
+        100
+      ],
+      "credentials": {
+        "googleCalendarOAuth2": {
+          "id": "google-calendar-credentials",
+          "name": "Google Calendar"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Traiter les statistiques\nconst stats = $input.first().json;\n\nconst formattedStats = {\n  timestamp: new Date().toISOString(),\n  allTimeStats: {\n    totalCalls: stats.allTime?.totalCount || 0,\n    totalDuration: stats.allTime?.duration || '0s',\n    joinedCalls: stats.allTime?.joinedCount || 0\n  },\n  dailyStats: stats.daily || []\n};\n\nreturn formattedStats;"
+      },
+      "id": "process-stats",
+      "name": "Traiter Statistiques",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "ultravox_stats",
+        "columns": "timestamp, total_calls, total_duration, joined_calls, daily_data",
+        "values": "={{ $json.timestamp }}, {{ $json.allTimeStats.totalCalls }}, '{{ $json.allTimeStats.totalDuration }}', {{ $json.allTimeStats.joinedCalls }}, '{{ JSON.stringify($json.dailyStats) }}'",
+        "options": {}
+      },
+      "id": "save-stats",
+      "name": "Sauvegarder Stats",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [
+        1340,
+        400
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credentials",
+          "name": "PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'success', processed: $('split-calls').all().length, rdvDetected: $('check-rdv').all().length }, null, 2) }}",
+        "options": {}
+      },
+      "id": "webhook-response",
+      "name": "Réponse Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1780,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Récupérer Appels Ultravox",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Récupérer Appels Ultravox": {
+      "main": [
+        [
+          {
+            "node": "Traiter Chaque Appel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Traiter Chaque Appel": {
+      "main": [
+        [
+          {
+            "node": "Récupérer Transcript",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Récupérer Statistiques",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Récupérer Transcript": {
+      "main": [
+        [
+          {
+            "node": "Analyser Transcript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyser Transcript": {
+      "main": [
+        [
+          {
+            "node": "RDV Détecté?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RDV Détecté?": {
+      "main": [
+        [
+          {
+            "node": "Créer Événement",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Réponse Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Créer Événement": {
+      "main": [
+        [
+          {
+            "node": "Sauvegarder Calendrier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sauvegarder Calendrier": {
+      "main": [
+        [
+          {
+            "node": "Réponse Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Récupérer Statistiques": {
+      "main": [
+        [
+          {
+            "node": "Traiter Statistiques",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Traiter Statistiques": {
+      "main": [
+        [
+          {
+            "node": "Sauvegarder Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sauvegarder Stats": {
+      "main": [
+        [
+          {
+            "node": "Réponse Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "createdAt": "2025-01-18T10:00:00.000Z",
+      "updatedAt": "2025-01-18T10:00:00.000Z",
+      "id": "ultravox-tag",
+      "name": "ultravox"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2025-01-18T10:00:00.000Z",
+  "versionId": 1
+}

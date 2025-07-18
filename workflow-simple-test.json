@@ -1,0 +1,115 @@
+{
+  "meta": {
+    "instanceId": "ultravox-simple-workflow"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ultravox-webhook",
+        "responseMode": "responseNode"
+      },
+      "id": "f1a2b3c4-d5e6-7f8g-9h0i-j1k2l3m4n5o6",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        300,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "requestMethod": "GET",
+        "url": "https://api.ultravox.ai/api/calls",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "id": "a1b2c3d4-e5f6-7g8h-9i0j-k1l2m3n4o5p6",
+      "name": "Get Ultravox Calls",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        500,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ultravox-api",
+          "name": "Ultravox API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Simple analysis of Ultravox calls\nconst calls = $json.results || [];\n\nlet analysis = {\n  totalCalls: calls.length,\n  timestamp: new Date().toISOString(),\n  callsWithTranscripts: 0,\n  potentialAppointments: []\n};\n\n// Basic keyword detection for appointments\nconst appointmentKeywords = ['rendez-vous', 'appointment', 'meeting', 'rdv'];\n\nfor (const call of calls) {\n  if (call.transcript || call.messages) {\n    analysis.callsWithTranscripts++;\n    \n    // Simple check for appointment keywords in call data\n    const callText = JSON.stringify(call).toLowerCase();\n    const hasAppointmentKeyword = appointmentKeywords.some(keyword => \n      callText.includes(keyword)\n    );\n    \n    if (hasAppointmentKeyword) {\n      analysis.potentialAppointments.push({\n        callId: call.id,\n        detected: true,\n        timestamp: call.createdAt || new Date().toISOString()\n      });\n    }\n  }\n}\n\nreturn analysis;"
+      },
+      "id": "b2c3d4e5-f6g7-8h9i-0j1k-l2m3n4o5p6q7",
+      "name": "Analyze Calls",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"success\",\n  \"message\": \"Workflow executed successfully\",\n  \"data\": {{ JSON.stringify($json, null, 2) }}\n}"
+      },
+      "id": "c3d4e5f6-g7h8-9i0j-1k2l-m3n4o5p6q7r8",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        900,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get Ultravox Calls",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Ultravox Calls": {
+      "main": [
+        [
+          {
+            "node": "Analyze Calls",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Calls": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2025-01-18T10:00:00.000Z",
+  "versionId": 1
+}
