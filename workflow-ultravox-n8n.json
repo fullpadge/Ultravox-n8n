@@ -1,0 +1,414 @@
+{
+  "name": "Workflow Ultravox - Transcripts, Statistiques et Confirmations RDV",
+  "description": "Workflow n8n pour gérer les transcripts Ultravox, statistiques d'usage et confirmations de rendez-vous via iCal",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Déclencheur Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [240, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ultravox-webhook",
+        "options": {
+          "noResponseBody": false
+        }
+      }
+    },
+    {
+      "id": "2", 
+      "name": "Récupérer Liste des Appels",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [460, 300],
+      "parameters": {
+        "url": "https://api.ultravox.ai/api/calls",
+        "method": "GET",
+        "headers": {
+          "X-API-Key": "={{$credentials.ultravoxApi.apiKey}}"
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "ultravoxApi": {
+          "id": "ultravox_credentials",
+          "name": "Ultravox API"
+        }
+      }
+    },
+    {
+      "id": "3",
+      "name": "Traiter Chaque Appel",
+      "type": "n8n-nodes-base.splitInBatches",
+      "position": [680, 300],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "4",
+      "name": "Récupérer Transcripts",
+      "type": "n8n-nodes-base.httpRequest", 
+      "position": [900, 200],
+      "parameters": {
+        "url": "=https://api.ultravox.ai/api/calls/{{$json.callId}}/messages",
+        "method": "GET",
+        "headers": {
+          "X-API-Key": "={{$credentials.ultravoxApi.apiKey}}"
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "5",
+      "name": "Récupérer Statistiques Usage",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [900, 400],
+      "parameters": {
+        "url": "https://api.ultravox.ai/api/accounts/me/usage/calls",
+        "method": "GET",
+        "headers": {
+          "X-API-Key": "={{$credentials.ultravoxApi.apiKey}}"
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "6",
+      "name": "Analyser Transcript pour RDV",
+      "type": "n8n-nodes-base.code",
+      "position": [1120, 200],
+      "parameters": {
+        "jsCode": "// Analyser le transcript pour détecter les rendez-vous\nconst transcript = $input.all()[0].json;\nconst messages = transcript.results || [];\n\n// Rechercher les mentions de rendez-vous\nconst rdvKeywords = ['rendez-vous', 'rdv', 'meeting', 'appointment', 'reunion'];\nconst dateKeywords = ['demain', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];\nconst timeKeywords = ['heure', 'h', ':', 'matin', 'après-midi', 'soir'];\n\nlet rdvDetected = false;\nlet rdvDetails = {\n  date: null,\n  time: null,\n  description: '',\n  participant: null,\n  needsConfirmation: false\n};\n\n// Analyser chaque message\nfor (const message of messages) {\n  const text = message.text?.toLowerCase() || '';\n  \n  // Détecter mention de RDV\n  const hasRdvKeyword = rdvKeywords.some(keyword => text.includes(keyword));\n  \n  if (hasRdvKeyword) {\n    rdvDetected = true;\n    rdvDetails.description += text + ' ';\n    \n    // Extraire les détails de date/heure\n    const hasDate = dateKeywords.some(keyword => text.includes(keyword));\n    const hasTime = timeKeywords.some(keyword => text.includes(keyword));\n    \n    if (hasDate) {\n      // Logique simplifiée pour extraire la date\n      rdvDetails.date = text.match(/(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|demain)/)?.[0] || null;\n    }\n    \n    if (hasTime) {\n      // Extraire l'heure\n      const timeMatch = text.match(/(\\d{1,2})[h:]?(\\d{2})?/);\n      if (timeMatch) {\n        rdvDetails.time = timeMatch[0];\n      }\n    }\n    \n    // Si RDV détecté, marquer pour confirmation\n    rdvDetails.needsConfirmation = true;\n  }\n}\n\nreturn {\n  callId: $json.callId,\n  rdvDetected,\n  rdvDetails,\n  transcript: messages\n};"
+      }
+    },
+    {
+      "id": "7",
+      "name": "Condition: RDV Détecté?",
+      "type": "n8n-nodes-base.if",
+      "position": [1340, 200],
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.rdvDetected}}",
+              "value2": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "8",
+      "name": "Créer Événement iCal",
+      "type": "n8n-nodes-base.code",
+      "position": [1560, 100],
+      "parameters": {
+        "jsCode": "// Créer un événement iCal\nconst rdv = $json.rdvDetails;\nconst now = new Date();\nconst tomorrow = new Date(now);\ntomorrow.setDate(now.getDate() + 1);\n\n// Calculer la date du RDV\nlet rdvDate = tomorrow;\nif (rdv.date) {\n  // Logique simplifiée pour mapper les jours\n  const dayMap = {\n    'lundi': 1, 'mardi': 2, 'mercredi': 3, 'jeudi': 4,\n    'vendredi': 5, 'samedi': 6, 'dimanche': 0\n  };\n  \n  const targetDay = dayMap[rdv.date];\n  if (targetDay !== undefined) {\n    rdvDate = new Date(now);\n    const currentDay = rdvDate.getDay();\n    const daysToAdd = (targetDay - currentDay + 7) % 7 || 7;\n    rdvDate.setDate(rdvDate.getDate() + daysToAdd);\n  }\n}\n\n// Définir l'heure\nlet rdvTime = '10:00'; // Heure par défaut\nif (rdv.time) {\n  rdvTime = rdv.time.replace('h', ':');\n  if (!rdvTime.includes(':')) {\n    rdvTime += ':00';\n  }\n}\n\n// Créer l'événement iCal\nconst startDateTime = new Date(rdvDate.toDateString() + ' ' + rdvTime);\nconst endDateTime = new Date(startDateTime.getTime() + 60 * 60 * 1000); // +1h\n\nconst icalEvent = {\n  title: 'Rendez-vous confirmé via Ultravox',\n  description: rdv.description.trim(),\n  startDate: startDateTime.toISOString(),\n  endDate: endDateTime.toISOString(),\n  location: 'À définir',\n  attendees: [],\n  needsConfirmation: rdv.needsConfirmation\n};\n\nreturn {\n  ...icalEvent,\n  callId: $json.callId,\n  originalRdv: rdv\n};"
+      }
+    },
+    {
+      "id": "9",
+      "name": "Sauvegarder dans iCal",
+      "type": "n8n-nodes-base.googleCalendar",
+      "position": [1780, 100],
+      "parameters": {
+        "operation": "create",
+        "calendarId": "primary",
+        "start": "={{$json.startDate}}",
+        "end": "={{$json.endDate}}",
+        "summary": "={{$json.title}}",
+        "description": "={{$json.description}}",
+        "location": "={{$json.location}}"
+      },
+      "credentials": {
+        "googleCalendarOAuth2": {
+          "id": "google_calendar_credentials",
+          "name": "Google Calendar"
+        }
+      }
+    },
+    {
+      "id": "10",
+      "name": "Envoyer Confirmation SMS",
+      "type": "n8n-nodes-base.twilioApi",
+      "position": [2000, 100],
+      "parameters": {
+        "operation": "send",
+        "from": "={{$credentials.twilioApi.phoneNumber}}",
+        "to": "={{$json.participantPhone || '+33123456789'}}",
+        "message": "Bonjour! Votre rendez-vous du {{$json.originalRdv.date}} à {{$json.originalRdv.time}} a été confirmé et ajouté à votre calendrier. Détails: {{$json.description}}"
+      },
+      "credentials": {
+        "twilioApi": {
+          "id": "twilio_credentials", 
+          "name": "Twilio API"
+        }
+      }
+    },
+    {
+      "id": "11",
+      "name": "Envoyer Email de Confirmation",
+      "type": "n8n-nodes-base.gmail",
+      "position": [2000, 200],
+      "parameters": {
+        "operation": "send",
+        "to": "={{$json.participantEmail || 'client@example.com'}}",
+        "subject": "Confirmation de votre rendez-vous",
+        "message": "Bonjour,\\n\\nVotre rendez-vous a été confirmé et ajouté à votre calendrier :\\n\\nDate: {{$json.originalRdv.date}}\\nHeure: {{$json.originalRdv.time}}\\nDescription: {{$json.description}}\\n\\nCordialement,\\nL'équipe Ultravox",
+        "options": {
+          "bodyType": "text"
+        }
+      },
+      "credentials": {
+        "gmail": {
+          "id": "gmail_credentials",
+          "name": "Gmail"
+        }
+      }
+    },
+    {
+      "id": "12",
+      "name": "Sauvegarder Statistiques",
+      "type": "n8n-nodes-base.code",
+      "position": [1120, 400],
+      "parameters": {
+        "jsCode": "// Traiter et formater les statistiques\nconst stats = $input.all()[0].json;\n\nconst formattedStats = {\n  timestamp: new Date().toISOString(),\n  allTimeStats: {\n    totalCalls: stats.allTime?.totalCount || 0,\n    totalDuration: stats.allTime?.duration || '0s',\n    joinedCalls: stats.allTime?.joinedCount || 0\n  },\n  dailyStats: stats.daily || [],\n  lastUpdateDate: new Date().toLocaleDateString('fr-FR')\n};\n\nreturn formattedStats;"
+      }
+    },
+    {
+      "id": "13",
+      "name": "Stocker dans Base de Données",
+      "type": "n8n-nodes-base.postgres",
+      "position": [1340, 400],
+      "parameters": {
+        "operation": "insert",
+        "table": "ultravox_stats",
+        "columns": "timestamp, total_calls, total_duration, joined_calls, daily_data",
+        "values": "={{$json.timestamp}}, {{$json.allTimeStats.totalCalls}}, '{{$json.allTimeStats.totalDuration}}', {{$json.allTimeStats.joinedCalls}}, '{{JSON.stringify($json.dailyStats)}}'"
+      },
+      "credentials": {
+        "postgres": {
+          "id": "postgres_credentials",
+          "name": "PostgreSQL"
+        }
+      }
+    },
+    {
+      "id": "14",
+      "name": "Générer Rapport",
+      "type": "n8n-nodes-base.code",
+      "position": [1560, 400],
+      "parameters": {
+        "jsCode": "// Générer un rapport de synthèse\nconst allData = $input.all();\n\n// Récupérer les données des différentes branches\nlet transcripts = [];\nlet stats = {};\nlet confirmedRdv = [];\n\nfor (const item of allData) {\n  if (item.json.transcript) {\n    transcripts.push({\n      callId: item.json.callId,\n      messages: item.json.transcript\n    });\n  }\n  \n  if (item.json.allTimeStats) {\n    stats = item.json;\n  }\n  \n  if (item.json.title && item.json.needsConfirmation) {\n    confirmedRdv.push({\n      title: item.json.title,\n      startDate: item.json.startDate,\n      description: item.json.description\n    });\n  }\n}\n\nconst report = {\n  generatedAt: new Date().toISOString(),\n  summary: {\n    totalCallsProcessed: transcripts.length,\n    rdvConfirmed: confirmedRdv.length,\n    totalCallDuration: stats.allTimeStats?.totalDuration || '0s'\n  },\n  transcripts: transcripts,\n  statistics: stats,\n  confirmedAppointments: confirmedRdv\n};\n\nreturn report;"
+      }
+    },
+    {
+      "id": "15",
+      "name": "Webhook de Fin",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [1780, 400],
+      "parameters": {
+        "options": {
+          "responseBody": "={{JSON.stringify($json, null, 2)}}",
+          "responseHeaders": {
+            "Content-Type": "application/json"
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Déclencheur Webhook": {
+      "main": [
+        [
+          {
+            "node": "Récupérer Liste des Appels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Récupérer Liste des Appels": {
+      "main": [
+        [
+          {
+            "node": "Traiter Chaque Appel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Traiter Chaque Appel": {
+      "main": [
+        [
+          {
+            "node": "Récupérer Transcripts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Récupérer Statistiques Usage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Récupérer Transcripts": {
+      "main": [
+        [
+          {
+            "node": "Analyser Transcript pour RDV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyser Transcript pour RDV": {
+      "main": [
+        [
+          {
+            "node": "Condition: RDV Détecté?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Condition: RDV Détecté?": {
+      "main": [
+        [
+          {
+            "node": "Créer Événement iCal",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Créer Événement iCal": {
+      "main": [
+        [
+          {
+            "node": "Sauvegarder dans iCal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sauvegarder dans iCal": {
+      "main": [
+        [
+          {
+            "node": "Envoyer Confirmation SMS",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Envoyer Email de Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Récupérer Statistiques Usage": {
+      "main": [
+        [
+          {
+            "node": "Sauvegarder Statistiques",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sauvegarder Statistiques": {
+      "main": [
+        [
+          {
+            "node": "Stocker dans Base de Données",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stocker dans Base de Données": {
+      "main": [
+        [
+          {
+            "node": "Générer Rapport",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Envoyer Confirmation SMS": {
+      "main": [
+        [
+          {
+            "node": "Générer Rapport",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Envoyer Email de Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Générer Rapport",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Générer Rapport": {
+      "main": [
+        [
+          {
+            "node": "Webhook de Fin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["ultravox", "transcripts", "statistics", "appointments", "ical"],
+  "triggerCount": 1,
+  "updatedAt": "2025-01-18T10:00:00.000Z",
+  "versionId": 1
+}

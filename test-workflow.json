@@ -1,0 +1,286 @@
+{
+  "test_name": "Test du Workflow Ultravox n8n",
+  "description": "Données de test pour valider le fonctionnement du workflow",
+  "test_cases": [
+    {
+      "name": "Test 1: Détection RDV Simple",
+      "input": {
+        "webhook_payload": {
+          "trigger": "test",
+          "test_data": true
+        },
+        "mock_ultravox_calls": [
+          {
+            "callId": "test-call-001",
+            "status": "completed",
+            "duration": "180s",
+            "createdAt": "2025-01-18T10:00:00Z"
+          }
+        ],
+        "mock_transcript": {
+          "results": [
+            {
+              "role": "MESSAGE_ROLE_USER",
+              "text": "Bonjour, je souhaiterais prendre un rendez-vous pour demain à 14h",
+              "timespan": {
+                "start": "2025-01-18T10:01:00Z",
+                "end": "2025-01-18T10:01:05Z"
+              }
+            },
+            {
+              "role": "MESSAGE_ROLE_AGENT", 
+              "text": "Parfait ! Je peux vous proposer un créneau demain à 14h. Pouvez-vous me confirmer votre nom et numéro de téléphone ?",
+              "timespan": {
+                "start": "2025-01-18T10:01:06Z",
+                "end": "2025-01-18T10:01:12Z"
+              }
+            },
+            {
+              "role": "MESSAGE_ROLE_USER",
+              "text": "Oui, c'est Jean Dupont, mon numéro est le 06 12 34 56 78",
+              "timespan": {
+                "start": "2025-01-18T10:01:15Z",
+                "end": "2025-01-18T10:01:20Z"
+              }
+            },
+            {
+              "role": "MESSAGE_ROLE_AGENT",
+              "text": "Parfait Monsieur Dupont, votre rendez-vous est confirmé pour demain 19 janvier à 14h. Vous recevrez une confirmation par SMS.",
+              "timespan": {
+                "start": "2025-01-18T10:01:22Z",
+                "end": "2025-01-18T10:01:28Z"
+              }
+            }
+          ]
+        }
+      },
+      "expected_output": {
+        "rdv_detected": true,
+        "rdv_details": {
+          "date": "demain",
+          "time": "14h",
+          "participant": "Jean Dupont",
+          "phone": "06 12 34 56 78",
+          "description": "Rendez-vous confirmé",
+          "needsConfirmation": true
+        },
+        "calendar_event": {
+          "title": "Rendez-vous confirmé via Ultravox",
+          "startDate": "2025-01-19T14:00:00.000Z",
+          "endDate": "2025-01-19T15:00:00.000Z"
+        }
+      }
+    },
+    {
+      "name": "Test 2: Pas de RDV Détecté",
+      "input": {
+        "webhook_payload": {
+          "trigger": "test",
+          "test_data": true
+        },
+        "mock_transcript": {
+          "results": [
+            {
+              "role": "MESSAGE_ROLE_USER",
+              "text": "Bonjour, j'aimerais avoir des informations sur vos services",
+              "timespan": {
+                "start": "2025-01-18T10:00:00Z",
+                "end": "2025-01-18T10:00:05Z"
+              }
+            },
+            {
+              "role": "MESSAGE_ROLE_AGENT",
+              "text": "Bien sûr ! Nous proposons différents services de consultation. Que souhaitez-vous savoir en particulier ?",
+              "timespan": {
+                "start": "2025-01-18T10:00:06Z",
+                "end": "2025-01-18T10:00:12Z"
+              }
+            },
+            {
+              "role": "MESSAGE_ROLE_USER",
+              "text": "Quels sont vos tarifs et horaires d'ouverture ?",
+              "timespan": {
+                "start": "2025-01-18T10:00:15Z",
+                "end": "2025-01-18T10:00:18Z"
+              }
+            }
+          ]
+        }
+      },
+      "expected_output": {
+        "rdv_detected": false,
+        "rdv_details": {
+          "needsConfirmation": false
+        },
+        "calendar_event": null
+      }
+    },
+    {
+      "name": "Test 3: RDV avec Date Spécifique",
+      "input": {
+        "webhook_payload": {
+          "trigger": "test",
+          "test_data": true  
+        },
+        "mock_transcript": {
+          "results": [
+            {
+              "role": "MESSAGE_ROLE_USER",
+              "text": "Je voudrais un rendez-vous le lundi prochain à 9h du matin",
+              "timespan": {
+                "start": "2025-01-18T10:00:00Z",
+                "end": "2025-01-18T10:00:05Z"
+              }
+            },
+            {
+              "role": "MESSAGE_ROLE_AGENT",
+              "text": "C'est noté ! Rendez-vous le lundi 27 janvier à 9h. Votre email pour la confirmation ?",
+              "timespan": {
+                "start": "2025-01-18T10:00:06Z",
+                "end": "2025-01-18T10:00:10Z"
+              }
+            },
+            {
+              "role": "MESSAGE_ROLE_USER",
+              "text": "jean.dupont@email.com",
+              "timespan": {
+                "start": "2025-01-18T10:00:12Z",
+                "end": "2025-01-18T10:00:15Z"
+              }
+            }
+          ]
+        }
+      },
+      "expected_output": {
+        "rdv_detected": true,
+        "rdv_details": {
+          "date": "lundi",
+          "time": "9h",
+          "participant_email": "jean.dupont@email.com",
+          "description": "Rendez-vous le lundi prochain à 9h",
+          "needsConfirmation": true
+        }
+      }
+    }
+  ],
+  "mock_statistics": {
+    "allTime": {
+      "totalCount": 25,
+      "duration": "1800s",
+      "joinedCount": 23
+    },
+    "daily": [
+      {
+        "totalCount": 5,
+        "duration": "360s", 
+        "joinedCount": 5,
+        "date": "2025-01-18"
+      },
+      {
+        "totalCount": 8,
+        "duration": "480s",
+        "joinedCount": 7,
+        "date": "2025-01-17"
+      }
+    ]
+  },
+  "test_endpoints": {
+    "webhook_url": "http://localhost:5678/webhook/ultravox-webhook",
+    "n8n_api": "http://localhost:5678/rest",
+    "postgres_connection": "postgresql://ultravox_user:ultravox_password_123@localhost:5432/ultravox_db"
+  },
+  "validation_queries": [
+    {
+      "name": "Vérifier insertion des statistiques",
+      "sql": "SELECT COUNT(*) FROM ultravox_stats WHERE timestamp >= CURRENT_DATE;"
+    },
+    {
+      "name": "Vérifier détection des RDV",
+      "sql": "SELECT COUNT(*) FROM ultravox_transcripts WHERE rdv_detected = true;"
+    },
+    {
+      "name": "Vérifier rendez-vous confirmés",
+      "sql": "SELECT COUNT(*) FROM confirmed_appointments WHERE created_at >= CURRENT_DATE;"
+    }
+  ],
+  "test_instructions": {
+    "setup": [
+      "1. Démarrer les services avec ./start.sh",
+      "2. Attendre que n8n soit complètement démarré (http://localhost:5678)",
+      "3. Importer le workflow depuis workflow-ultravox-n8n.json",
+      "4. Configurer les credentials de test"
+    ],
+    "execution": [
+      "1. Activer le workflow dans n8n",
+      "2. Envoyer les payloads de test via curl ou Postman",
+      "3. Vérifier l'exécution dans l'interface n8n",
+      "4. Contrôler les données en base avec les requêtes SQL"
+    ],
+    "verification": [
+      "1. Vérifier que les statistiques sont sauvegardées",
+      "2. Contrôler que les RDV sont détectés correctement", 
+      "3. Valider la création d'événements calendrier",
+      "4. Tester l'envoi des notifications (mode test)"
+    ]
+  },
+  "curl_examples": [
+    {
+      "name": "Test basique du webhook",
+      "command": "curl -X POST http://localhost:5678/webhook/ultravox-webhook -H 'Content-Type: application/json' -d '{\"trigger\": \"test\", \"test_case\": 1}'"
+    },
+    {
+      "name": "Test avec données complètes",
+      "command": "curl -X POST http://localhost:5678/webhook/ultravox-webhook -H 'Content-Type: application/json' -d @test_payload.json"
+    }
+  ],
+  "test_payload_example": {
+    "trigger": "manual_test",
+    "data": {
+      "callId": "test-call-001",
+      "transcript": {
+        "results": [
+          {
+            "role": "MESSAGE_ROLE_USER",
+            "text": "Je voudrais prendre rendez-vous demain à 15h30 s'il vous plaît"
+          },
+          {
+            "role": "MESSAGE_ROLE_AGENT", 
+            "text": "Parfait ! Je confirme votre rendez-vous pour demain à 15h30. Quel est votre nom ?"
+          },
+          {
+            "role": "MESSAGE_ROLE_USER",
+            "text": "Marie Martin, mon email est marie.martin@example.com"
+          }
+        ]
+      }
+    }
+  },
+  "troubleshooting": {
+    "common_issues": [
+      {
+        "issue": "Workflow ne se déclenche pas",
+        "solutions": [
+          "Vérifier que le webhook est actif dans n8n",
+          "Contrôler l'URL du webhook",
+          "Tester avec un payload simple"
+        ]
+      },
+      {
+        "issue": "Erreur de connexion PostgreSQL",
+        "solutions": [
+          "Vérifier que le conteneur postgres est démarré",
+          "Contrôler les credentials de la base",
+          "Tester la connexion depuis n8n"
+        ]
+      },
+      {
+        "issue": "API Ultravox inaccessible",
+        "solutions": [
+          "Vérifier la clé API dans les credentials",
+          "Tester l'API manuellement avec curl",
+          "Contrôler les limites de rate limiting"
+        ]
+      }
+    ]
+  }
+}
