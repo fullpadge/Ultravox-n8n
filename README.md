@@ -1,4 +1,4 @@
-# 🎙️ Workflow n8n Ultravox - Gestion Complète des Appels
+# 🎙️ Workflow n8n Ultravox - Gestion Complète des Appels Attention en test présentement ! 
 
 > **Workflow automatisé pour gérer les transcripts Ultravox, analyser les rendez-vous et confirmer via iCal**
 
@@ -379,6 +379,6 @@ Merci à toutes les équipes qui ont rendu ce projet possible :
 
 **🎉 Transformez vos appels Ultravox en rendez-vous confirmés automatiquement ! 🎉**
 
-*Développé avec ❤️ par Scout Assistant*
+*Développé avec ❤️ par Fullpadge Jean-Sébastien Larose *
 
 </div>
